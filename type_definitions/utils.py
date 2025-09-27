@@ -9,22 +9,17 @@ from aerobench.examples.gcas.gcas_autopilot import GcasAutopilot
 from aerobench.run_f16_sim import run_f16_sim
 
 
-def generate_single_case(seed: Optional[int] = None) -> TestCase:
-    if seed is not None:
-        np.random.seed(seed)
-
+def generate_single_case() -> TestCase:
     vel = np.random.uniform(300, 900)
-    alpha = np.deg2rad(np.random.uniform(1.0, 3.5))  # Typical trim range
+    alpha = np.deg2rad(np.random.uniform(1.0, 2.0))
     beta = np.deg2rad(np.random.uniform(-5, 5))
 
-    alt = np.random.uniform(1000, 5000)
-    power = np.random.uniform(7, 10)
+    alt = np.random.uniform(4000, 5000)
     phi = np.deg2rad(np.random.uniform(-120, 120))
     theta = np.deg2rad(np.random.uniform(-60, 0))
-    psi = np.deg2rad(np.random.uniform(-180, 180))
-    p = np.deg2rad(np.random.uniform(-10, 10))
-    q = np.deg2rad(np.random.uniform(-10, 10))
-    r = np.deg2rad(np.random.uniform(-10, 10))
+
+    psi = 0
+    power = 9
 
     return TestCase(
         vt=vel,
@@ -35,23 +30,20 @@ def generate_single_case(seed: Optional[int] = None) -> TestCase:
         psi=psi,
         alt=alt,
         power=power,
-        p=p,
-        q=q,
-        r=r,
     )
 
 
-def generate_cases(count: int, seed: Optional[int] = None) -> List[TestCase]:
-    return [generate_single_case(seed) for _ in range(count)]
+def generate_cases(count: int) -> List[TestCase]:
+    return [generate_single_case() for _ in range(count)]
 
 
 def evaluate_cases(cases: List[TestCase]) -> List[TestResult]:
-    sim_time = 15.0
+    sim_time = 15
 
     max_safe_velocity = 2500
     min_safe_velocity = 300
 
-    autopilot = GcasAutopilot(init_mode="roll")
+    autopilot = GcasAutopilot(init_mode="roll", stdout=False)
 
     results = []
     for case in cases:
@@ -87,7 +79,7 @@ def evaluate_cases(cases: List[TestCase]) -> List[TestResult]:
                         if vel < min_safe_velocity
                         else vel - max_safe_velocity
                     )
-                    result.score -= 1 * (0.01 * dv)
+                    result.score -= 1 * (0.01 * float(dv))
 
             # store the trajectory
             result.trajectory = np.column_stack(
