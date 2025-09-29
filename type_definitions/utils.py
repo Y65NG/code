@@ -10,6 +10,8 @@ from aerobench.run_f16_sim import run_f16_sim
 
 
 def generate_single_case() -> TestCase:
+
+    # TODO: look for better ranges
     vel = np.random.uniform(300, 900)
     alpha = np.deg2rad(np.random.uniform(1.0, 2.0))
     beta = np.deg2rad(np.random.uniform(-5, 5))
@@ -105,3 +107,13 @@ def evaluate_cases(cases: List[TestCase]) -> List[TestResult]:
 
 def frechet_distance(trajectory1: np.ndarray, trajectory2: np.ndarray) -> float:
     return float(similaritymeasures.frechet_dist(trajectory1, trajectory2))
+
+
+def pairwise_distances(trajectories: List[np.ndarray]) -> np.ndarray:
+    # return a pairwise distance matrix
+    return np.array(
+        [
+            [frechet_distance(traj1, traj2) for traj2 in trajectories]
+            for traj1 in trajectories
+        ]
+    )
