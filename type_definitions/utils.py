@@ -84,7 +84,15 @@ def evaluate_cases(cases: List[TestCase]) -> List[TestResult]:
                     )
                     result.score -= 1 * (0.01 * float(dv))
 
-            # store the trajectory
+            # calculate g_force values from Nz_list
+            # Nz stands for normal acceleration of the aircraft, which value is zero at 1g
+            if "Nz_list" in raw_result and raw_result["Nz_list"] is not None:
+                Nz_list = raw_result["Nz_list"]
+                # convert Nz to pilot g_force: g_force = 1 + Nz
+                g_forces = 1 + np.array(Nz_list)
+            else:
+                g_forces = np.zeros(len(states))
+
             result.trajectory = np.column_stack(
                 [
                     states[:, StateIndex.POS_N],
@@ -93,6 +101,7 @@ def evaluate_cases(cases: List[TestCase]) -> List[TestResult]:
                     states[:, StateIndex.PHI],
                     states[:, StateIndex.THETA],
                     states[:, StateIndex.PSI],
+                    g_forces,
                 ]
             )
 
