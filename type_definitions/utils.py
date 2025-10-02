@@ -1,6 +1,7 @@
 import numpy as np
 from typing import List, Optional
 import similaritymeasures
+from concurrent.futures import ThreadPoolExecutor
 
 from aerobench.util import StateIndex
 from type_definitions.test_case import TestCase
@@ -109,11 +110,50 @@ def frechet_distance(trajectory1: np.ndarray, trajectory2: np.ndarray) -> float:
     return float(similaritymeasures.frechet_dist(trajectory1, trajectory2))
 
 
-def pairwise_distances(trajectories: List[np.ndarray]) -> np.ndarray:
-    # return a pairwise distance matrix
-    return np.array(
-        [
-            [frechet_distance(traj1, traj2) for traj2 in trajectories]
-            for traj1 in trajectories
-        ]
-    )
+def _calculate_distance_pair(args):
+    i, j, traj1, traj2 = args
+    if i == j:
+        return 0.0
+    return frechet_distance(traj1, traj2)
+
+
+def pairwise_distances(
+    trajectories: List[np.ndarray], n_jobs: Optional[int] = None
+) -> np.ndarray:
+    """
+    Calculate pairwise distance matrix between trajectories with optimizations.
+
+    Args:
+        trajectories: List of trajectory arrays
+        n_jobs: Number of parallel jobs (-1 for all CPUs, 1 for no parallelization)
+
+    Returns:
+        Symmetric pairwise distance matrix as numpy array
+    """
+    n = len(trajectories)
+    if n == 0:
+        return np.array([])
+
+    # Initialize distance matrix
+    distances = np.zeros((n, n))
+
+    # Prepare arguments for parallel processing
+    args_list = []
+    for i in range(n):
+        for j in range(i, n):
+            args_list.append((i, j, trajectories[i], trajectories[j]))
+
+    # Calculate distances in parallel
+    with ThreadPoolExecutor(max_workers=n_jobs) as executor:
+        results = list(executor.map(_calculate_distance_pair, args_list))
+
+    # Fill the distance matrix
+    idx = 0
+    for i in range(n):
+        for j in range(i, n):
+            dist = results[idx]
+            distances[i, j] = dist
+            distances[j, i] = dist  # Symmetric matrix
+            idx += 1
+
+    return distances
