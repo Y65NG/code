@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List
 import numpy as np
 
@@ -16,4 +16,4 @@ class TestResult:
 
     min_alt: float = 0.0
 
-    trajectory: np.ndarray = np.array([])
+    trajectory: np.ndarray = field(default_factory=lambda: np.array([]))
