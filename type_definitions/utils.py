@@ -1,5 +1,5 @@
 import numpy as np
-from typing import List, Optional
+from typing import List, Optional, Tuple
 import similaritymeasures
 from concurrent.futures import ThreadPoolExecutor
 
@@ -88,8 +88,7 @@ def evaluate_cases(cases: List[TestCase]) -> List[TestResult]:
             # Nz stands for normal acceleration of the aircraft, which value is zero at 1g
             if "Nz_list" in raw_result and raw_result["Nz_list"] is not None:
                 Nz_list = raw_result["Nz_list"]
-                # convert Nz to pilot g_force: g_force = 1 + Nz
-                g_forces = 1 + np.array(Nz_list)
+                g_forces = np.array(Nz_list)
             else:
                 g_forces = np.zeros(len(states))
 
@@ -108,7 +107,7 @@ def evaluate_cases(cases: List[TestCase]) -> List[TestResult]:
             results.append(result)
 
         except Exception as e:
-            print(f"Error evaluating cases: {e}")
+            # print(f"Error evaluating cases: {e}")
             result = TestResult(case, simulation_failed=True)
             results.append(result)
 
@@ -166,3 +165,51 @@ def pairwise_distances(
             idx += 1
 
     return distances
+
+
+def has_unsafe_gforces(trajectory, min_g_force=-1.0, max_g_force=6.0):
+    if trajectory.shape[1] < 7:
+        return False
+
+    g_forces = trajectory[:, 6]
+    return np.any(np.abs(g_forces) > max_g_force) or np.any(g_forces < min_g_force)
+
+
+def greedy_permutation_clustering(
+    distance_matrix: np.ndarray, k_centers: int
+) -> Tuple[List[int], List[int]]:
+    n_points = distance_matrix.shape[0]
+
+    if k_centers >= n_points:
+        return list(range(n_points)), list(range(n_points))
+
+    # Select first center as most central point (minimum sum of distances)
+    center_indices = [int(np.argmin(np.sum(distance_matrix, axis=1)))]
+
+    # Select remaining centers
+    for _ in range(k_centers - 1):
+        # Find point farthest from its nearest center
+        max_min_distance = -1
+        best_candidate = -1
+
+        for i in range(n_points):
+            if i not in center_indices:
+                # Find distance to nearest center
+                min_distance = min(
+                    distance_matrix[i, center] for center in center_indices
+                )
+
+                if min_distance > max_min_distance:
+                    max_min_distance = min_distance
+                    best_candidate = i
+
+        center_indices.append(int(best_candidate))
+
+    # Assign each point to its nearest center
+    cluster_assignments = []
+    for i in range(n_points):
+        distances_to_centers = [distance_matrix[i, center] for center in center_indices]
+        nearest_center_idx = int(np.argmin(distances_to_centers))
+        cluster_assignments.append(nearest_center_idx)
+
+    return center_indices, cluster_assignments
