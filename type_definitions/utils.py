@@ -1,5 +1,6 @@
 import numpy as np
 from typing import List, Optional, Tuple
+from numpy.typing import NDArray
 import similaritymeasures
 from concurrent.futures import ThreadPoolExecutor
 
@@ -114,7 +115,9 @@ def evaluate_cases(cases: List[TestCase]) -> List[TestResult]:
     return results
 
 
-def frechet_distance(trajectory1: np.ndarray, trajectory2: np.ndarray) -> float:
+def frechet_distance(
+    trajectory1: NDArray[np.float64], trajectory2: NDArray[np.float64]
+) -> float:
     return float(similaritymeasures.frechet_dist(trajectory1, trajectory2))
 
 
@@ -126,18 +129,9 @@ def _calculate_distance_pair(args):
 
 
 def pairwise_distances(
-    trajectories: List[np.ndarray], n_jobs: Optional[int] = None
-) -> np.ndarray:
-    """
-    Calculate pairwise distance matrix between trajectories with optimizations.
+    trajectories: List[NDArray[np.float64]], n_jobs: Optional[int] = None
+) -> NDArray[np.float64]:
 
-    Args:
-        trajectories: List of trajectory arrays
-        n_jobs: Number of parallel jobs (-1 for all CPUs, 1 for no parallelization)
-
-    Returns:
-        Symmetric pairwise distance matrix as numpy array
-    """
     n = len(trajectories)
     if n == 0:
         return np.array([])
@@ -176,7 +170,7 @@ def has_unsafe_gforces(trajectory, min_g_force=-1.0, max_g_force=6.0):
 
 
 def greedy_permutation_clustering(
-    distance_matrix: np.ndarray, k_centers: int
+    distance_matrix: NDArray[np.float64], k_centers: int
 ) -> Tuple[List[int], List[int]]:
     n_points = distance_matrix.shape[0]
 
