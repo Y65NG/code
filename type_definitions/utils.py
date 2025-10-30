@@ -12,15 +12,20 @@ from aerobench.run_f16_sim import run_f16_sim
 
 
 def generate_single_case() -> TestCase:
+    # Velocity: 400-800 ft/s (typical for GCAS scenarios, within 300-2500 safety limit)
+    # Alpha: 0-10 deg (wider than trim-only, tests edge cases, within -10 to 45 safety limit)
+    # Beta: -20 to 20 deg (wider for realistic scenarios, within ±30 deg safety limit)
+    # Altitude: 500-6000 ft (includes below flight deck where GCAS activates at 1000 ft)
+    # Phi: -180 to 180 deg (full roll range including inverted scenarios)
+    # Theta: -90 to 0 deg (includes very steep dives, typical for GCAS scenarios)
 
-    # TODO: look for better ranges
-    vel = np.random.uniform(300, 900)
-    alpha = np.deg2rad(np.random.uniform(1.0, 2.0))
-    beta = np.deg2rad(np.random.uniform(-5, 5))
+    vel = np.random.uniform(400, 800)
+    alpha = np.deg2rad(np.random.uniform(0.0, 10.0))
+    beta = np.deg2rad(np.random.uniform(-20, 20))
 
-    alt = np.random.uniform(4000, 5000)
-    phi = np.deg2rad(np.random.uniform(-120, 120))
-    theta = np.deg2rad(np.random.uniform(-60, 0))
+    alt = np.random.uniform(500, 6000)
+    phi = np.deg2rad(np.random.uniform(-180, 180))
+    theta = np.deg2rad(np.random.uniform(-90, 0))
 
     psi = 0
     power = 9
@@ -115,6 +120,20 @@ def evaluate_cases(cases: List[TestCase]) -> List[TestResult]:
     return results
 
 
+def extract_altitude_trajectory(trajectory: NDArray[np.float64]) -> NDArray[np.float64]:
+    altitudes = trajectory[:, 2]
+    time_steps = np.arange(len(altitudes), dtype=np.float64)
+    return np.column_stack([time_steps, altitudes]).astype(np.float64)
+
+
+def altitude_frechet_distance(
+    trajectory1: NDArray[np.float64], trajectory2: NDArray[np.float64]
+) -> float:
+    alt_traj1 = extract_altitude_trajectory(trajectory1)
+    alt_traj2 = extract_altitude_trajectory(trajectory2)
+    return float(similaritymeasures.frechet_dist(alt_traj1, alt_traj2))
+
+
 def frechet_distance(
     trajectory1: NDArray[np.float64], trajectory2: NDArray[np.float64]
 ) -> float:
@@ -126,6 +145,13 @@ def _calculate_distance_pair(args):
     if i == j:
         return 0.0
     return frechet_distance(traj1, traj2)
+
+
+def _calculate_altitude_distance_pair(args):
+    i, j, traj1, traj2 = args
+    if i == j:
+        return 0.0
+    return altitude_frechet_distance(traj1, traj2)
 
 
 def pairwise_distances(
@@ -150,6 +176,35 @@ def pairwise_distances(
         results = list(executor.map(_calculate_distance_pair, args_list))
 
     # Fill the distance matrix
+    idx = 0
+    for i in range(n):
+        for j in range(i, n):
+            dist = results[idx]
+            distances[i, j] = dist
+            distances[j, i] = dist  # Symmetric matrix
+            idx += 1
+
+    return distances
+
+
+def pairwise_altitude_distances(
+    trajectories: List[NDArray[np.float64]], n_jobs: Optional[int] = None
+) -> NDArray[np.float64]:
+    n = len(trajectories)
+    if n == 0:
+        return np.array([])
+
+    distances = np.zeros((n, n))
+
+    args_list = []
+    for i in range(n):
+        for j in range(i, n):
+            args_list.append((i, j, trajectories[i], trajectories[j]))
+
+    # Calculate distances in parallel
+    with ThreadPoolExecutor(max_workers=n_jobs) as executor:
+        results = list(executor.map(_calculate_altitude_distance_pair, args_list))
+
     idx = 0
     for i in range(n):
         for j in range(i, n):
@@ -208,12 +263,16 @@ def greedy_permutation_clustering(
 
     return center_indices, cluster_assignments
 
+
 def frechet_coverage(
     distance_matrix: NDArray[np.float64],
     bins: int,
     hist_range: Tuple[float, float],
 ) -> Tuple[float, float]:
-    if distance_matrix.ndim != 2 or distance_matrix.shape[0] != distance_matrix.shape[1]:
+    if (
+        distance_matrix.ndim != 2
+        or distance_matrix.shape[0] != distance_matrix.shape[1]
+    ):
         return 0.0, 0.0
     n = distance_matrix.shape[0]
     if n < 2:
@@ -228,7 +287,7 @@ def frechet_coverage(
     # Width still uses robust percentiles (unchanged)
     p5 = np.percentile(d, 5.0)
     p95 = np.percentile(d, 95.0)
-    width = float(max(0.0, p95 - p5))
+    width = max(0.0, float(p95) - float(p5))
 
     # Uniformity uses FIXED bins and FIXED range for comparability
     lo, hi = hist_range
