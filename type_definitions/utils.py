@@ -207,3 +207,45 @@ def greedy_permutation_clustering(
         cluster_assignments.append(nearest_center_idx)
 
     return center_indices, cluster_assignments
+
+def frechet_coverage(
+    distance_matrix: NDArray[np.float64],
+    bins: int,
+    hist_range: Tuple[float, float],
+) -> Tuple[float, float]:
+    if distance_matrix.ndim != 2 or distance_matrix.shape[0] != distance_matrix.shape[1]:
+        return 0.0, 0.0
+    n = distance_matrix.shape[0]
+    if n < 2:
+        return 0.0, 0.0
+
+    iu = np.triu_indices(n, k=1)
+    d = distance_matrix[iu]
+    d = d[np.isfinite(d)]
+    if d.size == 0:
+        return 0.0, 0.0
+
+    # Width still uses robust percentiles (unchanged)
+    p5 = np.percentile(d, 5.0)
+    p95 = np.percentile(d, 95.0)
+    width = float(max(0.0, p95 - p5))
+
+    # Uniformity uses FIXED bins and FIXED range for comparability
+    lo, hi = hist_range
+    if not np.isfinite(lo) or not np.isfinite(hi) or hi <= lo:
+        return width, 0.0
+
+    counts, _ = np.histogram(d, bins=bins, range=(lo, hi))
+    total = counts.sum()
+    if total == 0:
+        return width, 0.0
+
+    p = counts.astype(np.float64) / total
+    p_nonzero = p[p > 0]
+    if p_nonzero.size == 0:
+        return width, 0.0
+
+    entropy = -np.sum(p_nonzero * np.log(p_nonzero))
+    max_entropy = np.log(len(p))
+    uniformity = float(entropy / max_entropy) if max_entropy > 0 else 0.0
+    return width, uniformity
