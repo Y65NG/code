@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import List, Optional
 
 
 @dataclass
@@ -116,28 +117,88 @@ class TestCase_ACAS:
         """
         Get combined ACASXU state array: [intruder_states (16) + ownship_states (16)].
         Includes integrator states for ACASXU simulator.
-        
+
         Args:
             llc: LowLevelController instance. If None, one will be created.
-        
+
         Returns:
             List of 32 floats representing the combined initial state for ACASXU.
         """
         from aerobench_ACASXU.lowlevel.low_level_controller import LowLevelController
-        
+
         if llc is None:
             llc = LowLevelController()
-        
+
         num_integrators = llc.get_num_integrators()
-        
+
         # Get intruder states and add integrators
         intruder_states = self.get_intruder_states()
         intruder_states += [0.0] * num_integrators
-        
+
         # Get ownship states and add integrators
         ownship_states = self.get_ownship_states()
         ownship_states += [0.0] * num_integrators
-        
+
         # Concatenate intruder and ownship states
         return intruder_states + ownship_states
 
+
+class AcasXuDubinsTestCase:
+    """Test case for ACASXU Dubins scenarios with exactly 2 aircraft: ownship and intruder
+
+    Uses simplified Dubins car dynamics (2D only, no altitude).
+    State vector: [x1, y1, theta1, x2, y2, theta2, time]
+    """
+
+    # Initial separation distance between ownship and intruder (ft)
+    # Intruder is placed on circle around ownship
+    separation: float = 25000.0
+
+    # Initial conditions for ownship (aircraft 0)
+    ownship_x: float = 0.0  # x position (ft) - ownship starts at origin
+    ownship_y: float = 0.0  # y position (ft)
+    ownship_theta: float = 0.0  # heading angle (rad) - typically π/2 (north)
+    ownship_v: float = 800.0  # velocity (ft/s)
+
+    # Initial conditions for intruder (aircraft 1)
+    intruder_placement_angle: float = (
+        0.0  # angle (rad) for placing intruder on circle around ownship
+    )
+    intruder_theta: float = 0.0  # heading angle (rad) - random heading
+    intruder_v: float = 500.0  # velocity (ft/s)
+
+    # ACASXU-specific parameters
+    tau_init: int = 0  # initial time to closest approach (seconds)
+    tau_dot: int = 0  # rate of change of tau (-1 for decreasing, 0 for constant)
+
+    # Intruder command list (for simulation)
+    # Commands: 0=clear of conflict, 1=weak left, 2=weak right, 3=strong left, 4=strong right
+    intruder_cmd_list: Optional[List[int]] = None
+
+    def __post_init__(self):
+        """Initialize default intruder command list if not provided"""
+        if self.intruder_cmd_list is None:
+            # Default: intruder doesn't turn (all clear of conflict commands)
+            self.intruder_cmd_list = [0] * 150
+
+    def get_initial_state_vec(self) -> List[float]:
+        """
+        Generate initial state vector for Dubins simulation.
+        Returns [x1, y1, theta1, x2, y2, theta2, time] where time starts at 0.
+        """
+        import math
+
+        # Ownship starts at origin
+        x1 = self.ownship_x
+        y1 = self.ownship_y
+        theta1 = self.ownship_theta
+
+        # Intruder is placed on circle around ownship
+        x2 = x1 + self.separation * math.cos(self.intruder_placement_angle)
+        y2 = y1 + self.separation * math.sin(self.intruder_placement_angle)
+        theta2 = self.intruder_theta
+
+        # Time starts at 0
+        time = 0.0
+
+        return [x1, y1, theta1, x2, y2, theta2, time]
