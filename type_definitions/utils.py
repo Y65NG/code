@@ -4,11 +4,15 @@ from numpy.typing import NDArray
 import similaritymeasures
 from concurrent.futures import ThreadPoolExecutor
 
-from aerobench.util import StateIndex
-from type_definitions.test_case import TestCase
-from type_definitions.test_result import TestResult
-from aerobench.examples.gcas.gcas_autopilot import GcasAutopilot
-from aerobench.run_f16_sim import run_f16_sim
+from aerobench_GCAS.util import StateIndex
+from type_definitions.test_case import TestCase, TestCase_ACAS
+from type_definitions.test_result import TestResult, TestResult_ACAS
+from aerobench_GCAS.examples.gcas.gcas_autopilot import GcasAutopilot
+from aerobench_ACASXU.examples.acasxu.acasxu_autopilot import AcasXuAutopilot
+from aerobench_GCAS.run_f16_sim import run_f16_sim
+from aerobench_ACASXU.run_f16_sim import run_f16_sim as run_f16_sim_acasxu
+from aerobench_ACASXU.util import StateIndex as StateIndexACASXU, extract_single_result
+from aerobench_ACASXU.lowlevel.low_level_controller import LowLevelController
 
 
 def generate_single_case() -> TestCase:
@@ -44,7 +48,6 @@ def generate_single_case() -> TestCase:
 
 def generate_cases(count: int) -> List[TestCase]:
     return [generate_single_case() for _ in range(count)]
-
 
 def evaluate_cases(cases: List[TestCase]) -> List[TestResult]:
     sim_time = 15
@@ -117,6 +120,183 @@ def evaluate_cases(cases: List[TestCase]) -> List[TestResult]:
             result = TestResult(case, simulation_failed=True)
             results.append(result)
 
+    return results
+
+
+def generate_single_case_acasxu() -> TestCase_ACAS:
+    """
+    Generate initial conditions for ACASXU simulator with ownship and intruder.
+    
+    Uses the same parameter ranges as generate_single_case() for both aircraft.
+    
+    Returns:
+        TestCase_ACAS object with initial conditions for both ownship and intruder.
+    """
+    # Generate ownship parameters (same ranges as generate_single_case)
+    ownship_vel = np.random.uniform(400, 800)
+    ownship_alpha = np.deg2rad(np.random.uniform(0.0, 10.0))
+    ownship_beta = np.deg2rad(np.random.uniform(-20, 20))
+    ownship_alt = np.random.uniform(500, 6000)
+    ownship_phi = np.deg2rad(np.random.uniform(-180, 180))
+    ownship_theta = np.deg2rad(np.random.uniform(-90, 0))
+    ownship_psi = 0
+    ownship_power = 9
+    ownship_pos_n = np.random.uniform(-5000, 5000)
+    ownship_pos_e = np.random.uniform(-5000, 5000)
+    
+    # Generate intruder parameters (same ranges as generate_single_case)
+    intruder_vel = np.random.uniform(400, 800)
+    intruder_alpha = np.deg2rad(np.random.uniform(0.0, 10.0))
+    intruder_beta = np.deg2rad(np.random.uniform(-20, 20))
+    intruder_alt = np.random.uniform(500, 6000)
+    intruder_phi = np.deg2rad(np.random.uniform(-180, 180))
+    intruder_theta = np.deg2rad(np.random.uniform(-90, 0))
+    intruder_psi = 0
+    intruder_power = 9
+    # Intruder position: typically positioned north of ownship
+    intruder_pos_n = np.random.uniform(15000, 35000)
+    intruder_pos_e = np.random.uniform(-5000, 5000)
+    
+    return TestCase_ACAS(
+        ownship_vt=ownship_vel,
+        ownship_alpha=ownship_alpha,
+        ownship_beta=ownship_beta,
+        ownship_phi=ownship_phi,
+        ownship_theta=ownship_theta,
+        ownship_psi=ownship_psi,
+        ownship_alt=ownship_alt,
+        ownship_power=ownship_power,
+        ownship_pos_n=ownship_pos_n,
+        ownship_pos_e=ownship_pos_e,
+        intruder_vt=intruder_vel,
+        intruder_alpha=intruder_alpha,
+        intruder_beta=intruder_beta,
+        intruder_phi=intruder_phi,
+        intruder_theta=intruder_theta,
+        intruder_psi=intruder_psi,
+        intruder_alt=intruder_alt,
+        intruder_power=intruder_power,
+        intruder_pos_n=intruder_pos_n,
+        intruder_pos_e=intruder_pos_e,
+    )
+
+def generate_cases_acasxu(count: int) -> List[TestCase_ACAS]:
+    return [generate_single_case_acasxu() for _ in range(count)]
+
+def evaluate_cases_acasxu(cases: List[TestCase_ACAS]) -> List[TestResult_ACAS]:
+    """
+    Evaluate TestCase_ACAS objects by running ACASXU simulations.
+    
+    Args:
+        cases: List of TestCase_ACAS objects to evaluate.
+    
+    Returns:
+        List of TestResult_ACAS objects containing simulation results.
+    """
+    sim_time = 15
+    max_safe_velocity = 2500
+    min_safe_velocity = 300
+    
+    llc = LowLevelController()
+    
+    results = []
+    for case in cases:
+        try:
+            # Get initial state for ACASXU (includes both intruder and ownship)
+            init_state = case.get_acasxu_states(llc)
+            
+            # Create ACASXU autopilot (num_aircraft_acasxu=1 means only ownship uses ACASXU)
+            autopilot = AcasXuAutopilot(init_state, llc, num_aircraft_acasxu=1, stdout=False)
+            
+            # Run simulation
+            raw_result = run_f16_sim_acasxu(
+                init_state,
+                sim_time,
+                autopilot,
+                extended_states=True,
+                print_errors=False,
+            )
+            
+            # Extract states for ownship (index 1) and intruder (index 0)
+            ownship_result = extract_single_result(raw_result, 1, llc)  # Ownship is index 1
+            intruder_result = extract_single_result(raw_result, 0, llc)  # Intruder is index 0
+            
+            ownship_states = np.array(ownship_result["states"])
+            intruder_states = np.array(intruder_result["states"])
+            
+            # Check altitudes and velocities for both aircraft
+            ownship_alts = ownship_states[:, StateIndexACASXU.ALT]
+            ownship_vels = ownship_states[:, StateIndexACASXU.VEL]
+            intruder_alts = intruder_states[:, StateIndexACASXU.ALT]
+            intruder_vels = intruder_states[:, StateIndexACASXU.VEL]
+            
+            # Create result object
+            result = TestResult_ACAS(case)
+            
+            # Find minimum altitude (worst case between both aircraft)
+            min_alt_ownship = np.min(ownship_alts)
+            min_alt_intruder = np.min(intruder_alts)
+            result.min_alt = min(min_alt_ownship, min_alt_intruder)
+            
+            # Check for crashes
+            if result.min_alt < 0:
+                result.crashed = True
+            
+            # Check velocity safety limits for both aircraft
+            if (np.any(ownship_vels < min_safe_velocity) or np.any(ownship_vels > max_safe_velocity) or
+                np.any(intruder_vels < min_safe_velocity) or np.any(intruder_vels > max_safe_velocity)):
+                result.violated_safety_limits = True
+            
+            # Calculate score
+            if result.crashed:
+                result.score -= 500
+            
+            # Penalize velocity violations
+            for vel in ownship_vels:
+                if vel < min_safe_velocity or vel > max_safe_velocity:
+                    dv = (
+                        vel - min_safe_velocity
+                        if vel < min_safe_velocity
+                        else vel - max_safe_velocity
+                    )
+                    result.score -= 1 * (0.01 * float(dv))
+            
+            for vel in intruder_vels:
+                if vel < min_safe_velocity or vel > max_safe_velocity:
+                    dv = (
+                        vel - min_safe_velocity
+                        if vel < min_safe_velocity
+                        else vel - max_safe_velocity
+                    )
+                    result.score -= 1 * (0.01 * float(dv))
+            
+            # Get g_force values from Nz_list for ownship
+            if "Nz_list" in ownship_result and ownship_result["Nz_list"] is not None:
+                Nz_list = ownship_result["Nz_list"]
+                ownship_g_forces = np.array(Nz_list)
+            else:
+                ownship_g_forces = np.zeros(len(ownship_states))
+            
+            # Build trajectory from ownship states (using ownship as primary)
+            result.trajectory = np.column_stack(
+                [
+                    ownship_states[:, StateIndexACASXU.POS_N],
+                    ownship_states[:, StateIndexACASXU.POS_E],
+                    ownship_states[:, StateIndexACASXU.ALT],
+                    ownship_states[:, StateIndexACASXU.PHI],
+                    ownship_states[:, StateIndexACASXU.THETA],
+                    ownship_states[:, StateIndexACASXU.PSI],
+                    ownship_g_forces,
+                ]
+            )
+            
+            results.append(result)
+            
+        except Exception as e:
+            # print(f"Error evaluating case: {e}")
+            result = TestResult_ACAS(case, simulation_failed=True)
+            results.append(result)
+    
     return results
 
 
