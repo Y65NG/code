@@ -14,6 +14,29 @@ from matplotlib.image import BboxImage
 from matplotlib.transforms import Bbox, TransformedBbox
 
 import matplotlib
+# Set backend before importing pyplot
+# Default to Agg (non-interactive) backend to avoid tkinter issues
+# This works fine for saving plots and generating videos
+# If tkinter is available and you want interactive plots, it will be used automatically
+# when matplotlib.pyplot is imported in an interactive environment
+try:
+    # Check if tkinter is available
+    import tkinter
+    # If tkinter is available, try TkAgg for potential interactive use
+    # but only if backend hasn't been explicitly set to something else
+    current_backend = matplotlib.get_backend().lower()
+    if current_backend not in ['module://matplotlib_inline.backend_inline', 'agg']:
+        pass  # Keep existing backend
+    else:
+        try:
+            matplotlib.use('TkAgg')
+        except (ImportError, ModuleNotFoundError, Exception):
+            # Fall back to Agg if TkAgg fails for any reason
+            matplotlib.use('Agg')
+except (ImportError, ModuleNotFoundError):
+    # Use non-interactive backend if TkAgg/tkinter is not available
+    matplotlib.use('Agg')
+
 import matplotlib.pyplot as plt
 
 from aerobench.util import get_state_names, StateIndex, get_script_path
@@ -21,7 +44,7 @@ from aerobench.util import get_state_names, StateIndex, get_script_path
 def init_plot():
     'initialize plotting style'
 
-    matplotlib.use('TkAgg') # set backend
+    # Backend is already set at module level
 
     parent = get_script_path(__file__)
     p = os.path.join(parent, 'bak_matplotlib.mlpstyle')

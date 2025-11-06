@@ -1,10 +1,10 @@
-'''
+"""
 Stanley Bak
 
 AcasXu f16 sim
 
 This script simulates multiple aircraft.
-'''
+"""
 
 import math
 import sys
@@ -19,28 +19,29 @@ from aerobench.lowlevel.low_level_controller import LowLevelController
 
 from aerobench.examples.acasxu.acasxu_autopilot import AcasXuAutopilot
 
+
 def make_init(llc, num_aircraft, diameter=25000):
-    'returns combined initial state'
+    "returns combined initial state"
 
     rv = []
 
     # psi = 0 is facing up
-    step = 2* math.pi / num_aircraft
+    step = 2 * math.pi / num_aircraft
     rad = diameter / 2
-    center = (0, rad/2)
+    center = (0, rad / 2)
 
-    theta_offset = -math.pi/2
+    theta_offset = -math.pi / 2
 
     # use trim state
 
     for a in range(num_aircraft):
-        #print("debug: only making 0 and 5")
-        #if a != 0 and a != 5:
+        # print("debug: only making 0 and 5")
+        # if a != 0 and a != 5:
         #    continue
 
         theta = theta_offset + step * a
         y = rad * math.sin(theta)
-        x = rad* math.cos(theta)
+        x = rad * math.cos(theta)
 
         psi = -(theta + theta_offset) + math.pi
 
@@ -55,12 +56,13 @@ def make_init(llc, num_aircraft, diameter=25000):
 
     return rv
 
+
 def main():
-    'main function to make plots'
+    "main function to make plots"
 
-    tmax = 100 # 3 # simulation time
+    tmax = 100  # 3 # simulation time
 
-    step = 1/30
+    step = 1 / 30
 
     llc = LowLevelController()
     num_vars = len(get_state_names()) + llc.get_num_integrators()
@@ -84,46 +86,56 @@ def main():
 
     num_aircraft_acasxu = num_aircraft
     stop_on_coc = True
-    ap = AcasXuAutopilot(init, llc, num_aircraft_acasxu=num_aircraft_acasxu, stop_on_coc=stop_on_coc)
+    ap = AcasXuAutopilot(
+        init, llc, num_aircraft_acasxu=num_aircraft_acasxu, stop_on_coc=stop_on_coc
+    )
 
     ap.coc_stop_delay = 20
 
-    #print("debug: initial command fixed")
-    #ap.next_nn_update = ap.nn_update_rate
-    #ap.commands[0] = 3
-    #ap.commands[1] = 4
+    # print("debug: initial command fixed")
+    # ap.next_nn_update = ap.nn_update_rate
+    # ap.commands[0] = 3
+    # ap.commands[1] = 4
 
     res = run_f16_sim(init, tmax, ap, step=step)
-    t = res['runtime']
+    t = res["runtime"]
 
     print(f"Simulation Completed in {round(t, 2)} seconds")
 
     plot.plot_overhead(res, llc=llc)
-    filename = 'overhead.png'
+    filename = "overhead.png"
     plt.savefig(filename)
     print(f"Made {filename}")
     plt.close()
 
-    mp4_filename = ''
+    mp4_filename = ""
 
     lines = []
     labels = []
 
     def anim_init_extra(ax):
-        'extra animation initialization'
+        "extra animation initialization"
 
         for _ in range(num_aircraft):
-            l, = ax.plot([], [], color='k', lw=0.5, zorder=1)
+            (l,) = ax.plot([], [], color="k", lw=0.5, zorder=1)
             lines.append(l)
 
-            t = ax.text(0, 0, "", fontsize=12, color='k', zorder=10,
-                        horizontalalignment='center', verticalalignment='top')
+            t = ax.text(
+                0,
+                0,
+                "",
+                fontsize=12,
+                color="k",
+                zorder=10,
+                horizontalalignment="center",
+                verticalalignment="top",
+            )
             labels.append(t)
 
         return lines + labels
 
     def anim_update_extra(_ax, t, state, _mode):
-        'extra animation update'
+        "extra animation update"
 
         closest_tuple = ap.full_history[0]
 
@@ -136,8 +148,8 @@ def main():
 
             label_text = f"{a}"
 
-            s1 = state[a*num_vars:(a+1)*num_vars]
-            
+            s1 = state[a * num_vars : (a + 1) * num_vars]
+
             x1 = s1[StateIndex.POS_E]
             y1 = s1[StateIndex.POS_N]
 
@@ -153,7 +165,13 @@ def main():
                     else:
                         all_command_str += f"${c}$"
 
-                names = ['clear', 'weak-left', 'weak-right', 'strong-left', 'strong-right']
+                names = [
+                    "clear",
+                    "weak-left",
+                    "weak-right",
+                    "strong-left",
+                    "strong-right",
+                ]
                 label_text = f"#{a} ({names[command]}) {all_command_str}"
 
                 b = closest_tuple[2][a]
@@ -163,7 +181,7 @@ def main():
                 else:
                     lines[a].set_visible(True)
 
-                    s2 = state[b*num_vars:(b+1)*num_vars]
+                    s2 = state[b * num_vars : (b + 1) * num_vars]
                     x2 = s2[StateIndex.POS_E]
                     y2 = s2[StateIndex.POS_N]
 
@@ -173,11 +191,11 @@ def main():
                     lines[a].set_data([x1, endx], [y1, endy])
             else:
                 lines[a].set_visible(False)
-                
+
             labels[a].set_text(label_text)
             labels[a].set_x(x1)
             plane_size = 1200
-            labels[a].set_y(y1 - plane_size/2)
+            labels[a].set_y(y1 - plane_size / 2)
 
     extra_info = True
 
@@ -189,14 +207,22 @@ def main():
     show_closest = False
     print_frame = True
 
-    #mp4_filename = f'acasxu{num_aircraft_acasxu}.mp4'
-    mp4_filename = ''
+    mp4_filename = f"acasxu{num_aircraft_acasxu}.mp4"
+    # mp4_filename = ""
     if len(mp4_filename) > 0:
         skip_frames = None
-        
-    anim.make_anim(res, llc, mp4_filename, show_closest=show_closest, print_frame=print_frame,
-                   skip_frames=skip_frames,
-                   init_extra=anim_init_extra, update_extra=anim_update_extra)
 
-if __name__ == '__main__':
+    anim.make_anim(
+        res,
+        llc,
+        mp4_filename,
+        show_closest=show_closest,
+        print_frame=print_frame,
+        skip_frames=skip_frames,
+        init_extra=anim_init_extra,
+        update_extra=anim_update_extra,
+    )
+
+
+if __name__ == "__main__":
     main()
