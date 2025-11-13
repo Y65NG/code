@@ -124,7 +124,7 @@ class TestCase_ACAS:
         Returns:
             List of 32 floats representing the combined initial state for ACASXU.
         """
-        from aerobench_ACASXU.lowlevel.low_level_controller import LowLevelController
+        from aerobench.lowlevel.low_level_controller import LowLevelController
 
         if llc is None:
             llc = LowLevelController()

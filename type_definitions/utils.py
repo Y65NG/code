@@ -9,15 +9,15 @@ try:
 except ImportError:  # pragma: no cover - handled at runtime
     fastdtw = None
 
-from aerobench_GCAS.util import StateIndex
+from aerobench.util import StateIndex
 from type_definitions.test_case import TestCase, TestCase_ACAS
 from type_definitions.test_result import TestResult, TestResult_ACAS
-from aerobench_GCAS.examples.gcas.gcas_autopilot import GcasAutopilot
-from aerobench_ACASXU.examples.acasxu.acasxu_autopilot import AcasXuAutopilot
-from aerobench_GCAS.run_f16_sim import run_f16_sim
-from aerobench_ACASXU.run_f16_sim import run_f16_sim as run_f16_sim_acasxu
-from aerobench_ACASXU.util import StateIndex as StateIndexACASXU, extract_single_result
-from aerobench_ACASXU.lowlevel.low_level_controller import LowLevelController
+from aerobench.examples.gcas.gcas_autopilot import GcasAutopilot
+from aerobench.examples.acasxu.acasxu_autopilot import AcasXuAutopilot
+from aerobench.run_f16_sim import run_f16_sim
+from aerobench.run_f16_sim import run_f16_sim as run_f16_sim_acasxu
+from aerobench.util import StateIndex as StateIndexACASXU, extract_single_result
+from aerobench.lowlevel.low_level_controller import LowLevelController
 from type_definitions.test_case import TestCase, AcasXuDubinsTestCase
 from type_definitions.test_result import (
     TestResult,
