@@ -4,6 +4,11 @@ from numpy.typing import NDArray
 import similaritymeasures
 from concurrent.futures import ThreadPoolExecutor
 
+try:
+    from fastdtw import fastdtw
+except ImportError:  # pragma: no cover - handled at runtime
+    fastdtw = None
+
 from aerobench_GCAS.util import StateIndex
 from type_definitions.test_case import TestCase, TestCase_ACAS
 from type_definitions.test_result import TestResult, TestResult_ACAS
@@ -13,14 +18,11 @@ from aerobench_GCAS.run_f16_sim import run_f16_sim
 from aerobench_ACASXU.run_f16_sim import run_f16_sim as run_f16_sim_acasxu
 from aerobench_ACASXU.util import StateIndex as StateIndexACASXU, extract_single_result
 from aerobench_ACASXU.lowlevel.low_level_controller import LowLevelController
-from aerobench.util import StateIndex, get_state_names
 from type_definitions.test_case import TestCase, AcasXuDubinsTestCase
 from type_definitions.test_result import (
     TestResult,
     AcasXuDubinsTestResult,
 )
-from aerobench.examples.gcas.gcas_autopilot import GcasAutopilot
-from aerobench.run_f16_sim import run_f16_sim
 
 
 def generate_single_case() -> TestCase:
@@ -335,36 +337,84 @@ def altitude_frechet_distance(
     return float(similaritymeasures.frechet_dist(alt_traj1, alt_traj2))
 
 
+def altitude_dtw_distance(
+    trajectory1: NDArray[np.float64], trajectory2: NDArray[np.float64]
+) -> float:
+    alt_traj1 = extract_altitude_trajectory(trajectory1)
+    alt_traj2 = extract_altitude_trajectory(trajectory2)
+    return dtw_distance(alt_traj1, alt_traj2)
+
+
 def frechet_distance(
     trajectory1: NDArray[np.float64], trajectory2: NDArray[np.float64]
 ) -> float:
     return float(similaritymeasures.frechet_dist(trajectory1, trajectory2))
 
 
+def _dtw_point_distance(p1: Tuple[float, ...], p2: Tuple[float, ...]) -> float:
+    return float(np.linalg.norm(np.asarray(p1) - np.asarray(p2)))
+
+
+def dtw_distance(
+    trajectory1: NDArray[np.float64], trajectory2: NDArray[np.float64]
+) -> float:
+    if fastdtw is None:
+        raise ImportError(
+            "fastdtw is not installed. Please install it to use DTW-based distances."
+        )
+
+    seq1 = [tuple(row) for row in np.asarray(trajectory1, dtype=np.float64)]
+    seq2 = [tuple(row) for row in np.asarray(trajectory2, dtype=np.float64)]
+
+    distance, _ = fastdtw(seq1, seq2, dist=_dtw_point_distance)
+    return float(distance)
+
+
 def _calculate_distance_pair(args):
-    i, j, traj1, traj2 = args
+    i, j, traj1, traj2, distance_func = args
     if i == j:
         return 0.0
-    return frechet_distance(traj1, traj2)
+    return distance_func(traj1, traj2)
 
 
 def _calculate_altitude_distance_pair(args):
-    i, j, traj1, traj2 = args
+    i, j, traj1, traj2, distance_func = args
     if i == j:
         return 0.0
-    return altitude_frechet_distance(traj1, traj2)
+    return distance_func(traj1, traj2)
 
 
 def _calculate_dubins_distance_pair(args):
-    i, j, traj1, traj2 = args
+    i, j, traj1, traj2, distance_func = args
     if i == j:
         return 0.0
-    return dubins_frechet_distance(traj1, traj2)
+    return distance_func(traj1, traj2)
 
 
 def pairwise_distances(
-    trajectories: List[NDArray[np.float64]], n_jobs: Optional[int] = None
+    trajectories: List[NDArray[np.float64]],
+    n_jobs: Optional[int] = None,
+    distance_type: str = "dtw",
 ) -> NDArray[np.float64]:
+    """
+    Calculate pairwise distances between trajectories.
+
+    Args:
+        trajectories: List of trajectory arrays
+        n_jobs: Number of parallel jobs (None for auto)
+        distance_type: Type of distance to use, either "dtw" or "frechet" (default: "dtw")
+
+    Returns:
+        Symmetric distance matrix of shape (n, n)
+    """
+    if distance_type == "dtw":
+        distance_func = dtw_distance
+    elif distance_type == "frechet":
+        distance_func = frechet_distance
+    else:
+        raise ValueError(
+            f"Unknown distance_type: {distance_type}. Must be 'dtw' or 'frechet'"
+        )
 
     n = len(trajectories)
     if n == 0:
@@ -377,7 +427,7 @@ def pairwise_distances(
     args_list = []
     for i in range(n):
         for j in range(i, n):
-            args_list.append((i, j, trajectories[i], trajectories[j]))
+            args_list.append((i, j, trajectories[i], trajectories[j], distance_func))
 
     # Calculate distances in parallel
     with ThreadPoolExecutor(max_workers=n_jobs) as executor:
@@ -396,8 +446,30 @@ def pairwise_distances(
 
 
 def pairwise_altitude_distances(
-    trajectories: List[NDArray[np.float64]], n_jobs: Optional[int] = None
+    trajectories: List[NDArray[np.float64]],
+    n_jobs: Optional[int] = None,
+    distance_type: str = "dtw",
 ) -> NDArray[np.float64]:
+    """
+    Calculate pairwise altitude distances between trajectories.
+
+    Args:
+        trajectories: List of trajectory arrays
+        n_jobs: Number of parallel jobs (None for auto)
+        distance_type: Type of distance to use, either "dtw" or "frechet" (default: "dtw")
+
+    Returns:
+        Symmetric distance matrix of shape (n, n)
+    """
+    if distance_type == "dtw":
+        distance_func = altitude_dtw_distance
+    elif distance_type == "frechet":
+        distance_func = altitude_frechet_distance
+    else:
+        raise ValueError(
+            f"Unknown distance_type: {distance_type}. Must be 'dtw' or 'frechet'"
+        )
+
     n = len(trajectories)
     if n == 0:
         return np.array([])
@@ -407,7 +479,7 @@ def pairwise_altitude_distances(
     args_list = []
     for i in range(n):
         for j in range(i, n):
-            args_list.append((i, j, trajectories[i], trajectories[j]))
+            args_list.append((i, j, trajectories[i], trajectories[j], distance_func))
 
     # Calculate distances in parallel
     with ThreadPoolExecutor(max_workers=n_jobs) as executor:
@@ -425,19 +497,31 @@ def pairwise_altitude_distances(
 
 
 def pairwise_dubins_distances(
-    combined_trajectories: List[NDArray[np.float64]], n_jobs: Optional[int] = None
+    combined_trajectories: List[NDArray[np.float64]],
+    n_jobs: Optional[int] = None,
+    distance_type: str = "dtw",
 ) -> NDArray[np.float64]:
     """
-    Calculate pairwise Fréchet distances for combined Dubin's trajectories.
+    Calculate pairwise distances for combined Dubin's trajectories.
 
     Args:
         combined_trajectories: List of NDArray, each with shape (len, 6) containing
                              [x1, y1, theta1, x2, y2, theta2] for each test case
         n_jobs: Number of parallel jobs (None for auto)
+        distance_type: Type of distance to use, either "dtw" or "frechet" (default: "dtw")
 
     Returns:
         Symmetric distance matrix of shape (n, n)
     """
+    if distance_type == "dtw":
+        distance_func = dubins_dtw_distance
+    elif distance_type == "frechet":
+        distance_func = dubins_frechet_distance
+    else:
+        raise ValueError(
+            f"Unknown distance_type: {distance_type}. Must be 'dtw' or 'frechet'"
+        )
+
     n = len(combined_trajectories)
     if n == 0:
         return np.array([])
@@ -447,7 +531,15 @@ def pairwise_dubins_distances(
     args_list = []
     for i in range(n):
         for j in range(i, n):
-            args_list.append((i, j, combined_trajectories[i], combined_trajectories[j]))
+            args_list.append(
+                (
+                    i,
+                    j,
+                    combined_trajectories[i],
+                    combined_trajectories[j],
+                    distance_func,
+                )
+            )
 
     # Calculate distances in parallel
     with ThreadPoolExecutor(max_workers=n_jobs) as executor:
@@ -462,6 +554,24 @@ def pairwise_dubins_distances(
             idx += 1
 
     return distances
+
+
+def pairwise_dtw_distances(
+    trajectories: List[NDArray[np.float64]], n_jobs: Optional[int] = None
+) -> NDArray[np.float64]:
+    """
+    Compute pairwise fast DTW distances between trajectories.
+
+    This is a convenience wrapper for pairwise_distances with distance_type="dtw".
+
+    Args:
+        trajectories: List of trajectory arrays
+        n_jobs: Number of parallel jobs (None for auto)
+
+    Returns:
+        Symmetric distance matrix of shape (n, n)
+    """
+    return pairwise_distances(trajectories, n_jobs=n_jobs, distance_type="dtw")
 
 
 def has_unsafe_gforces(trajectory, min_g_force=-1.0, max_g_force=6.0):
@@ -961,3 +1071,16 @@ def dubins_frechet_distance(
                       from second test case
     """
     return float(similaritymeasures.frechet_dist(trajectories1, trajectories2))
+
+
+def dubins_dtw_distance(
+    trajectories1: NDArray[np.float64], trajectories2: NDArray[np.float64]
+) -> float:
+    """
+    Args:
+        trajectories1: NDArray of shape (len1, 6) with [x1, y1, theta1, x2, y2, theta2]
+                      from first test case
+        trajectories2: NDArray of shape (len2, 6) with [x1, y1, theta1, x2, y2, theta2]
+                      from second test case
+    """
+    return dtw_distance(trajectories1, trajectories2)

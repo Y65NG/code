@@ -143,6 +143,7 @@ class TestCase_ACAS:
         return intruder_states + ownship_states
 
 
+@dataclass
 class AcasXuDubinsTestCase:
     """Test case for ACASXU Dubins scenarios with exactly 2 aircraft: ownship and intruder
 
