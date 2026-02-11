@@ -313,6 +313,35 @@ def evaluate_cases_acasxu(cases: List[TestCase_ACAS]) -> List[TestResult_ACAS]:
                 ]
             )
 
+            # Build intruder trajectory
+            result.intruder_trajectory = np.column_stack(
+                [
+                    intruder_states[:, StateIndexACASXU.POS_N],
+                    intruder_states[:, StateIndexACASXU.POS_E],
+                    intruder_states[:, StateIndexACASXU.ALT],
+                    intruder_states[:, StateIndexACASXU.PHI],
+                    intruder_states[:, StateIndexACASXU.THETA],
+                    intruder_states[:, StateIndexACASXU.PSI],
+                ]
+            )
+
+            # Build relative geometry trajectory (key for ACASXU similarity)
+            result.relative_trajectory = build_relative_trajectory(
+                ownship_states, intruder_states
+            )
+
+            # Compute minimum separation
+            rel_n = (
+                intruder_states[:, StateIndexACASXU.POS_N]
+                - ownship_states[:, StateIndexACASXU.POS_N]
+            )
+            rel_e = (
+                intruder_states[:, StateIndexACASXU.POS_E]
+                - ownship_states[:, StateIndexACASXU.POS_E]
+            )
+            separations = np.sqrt(rel_n**2 + rel_e**2)
+            result.min_separation = float(np.min(separations))
+
             results.append(result)
 
         except Exception as e:
@@ -368,6 +397,186 @@ def dtw_distance(
 
     distance, _ = fastdtw(seq1, seq2, dist=_dtw_point_distance)
     return float(distance)
+
+
+# =============================================================================
+# Relative Geometry Distance Functions (for ACASXU)
+# =============================================================================
+
+
+def build_relative_trajectory(
+    ownship_states: NDArray[np.float64],
+    intruder_states: NDArray[np.float64],
+) -> NDArray[np.float64]:
+    """Build trajectory based on relative geometry between ownship and intruder.
+
+    This is the key representation for ACASXU similarity - two scenarios are similar
+    if they have similar relative geometry evolution, not just similar ownship paths.
+
+    Args:
+        ownship_states: Ownship state array with columns matching StateIndexACASXU
+        intruder_states: Intruder state array with columns matching StateIndexACASXU
+
+    Returns:
+        Relative trajectory array with columns:
+        [separation_horiz, rel_alt, bearing, ownship_phi, closure_rate]
+        All values are normalized to similar scales for balanced DTW.
+    """
+    # Use indices directly to avoid import issues
+    POS_N, POS_E, ALT, PHI, PSI, VEL = 9, 10, 11, 3, 5, 0
+
+    # Relative position
+    rel_n = intruder_states[:, POS_N] - ownship_states[:, POS_N]
+    rel_e = intruder_states[:, POS_E] - ownship_states[:, POS_E]
+    rel_alt = intruder_states[:, ALT] - ownship_states[:, ALT]
+
+    # Horizontal separation distance (most important for ACASXU)
+    separation_horiz = np.sqrt(rel_n**2 + rel_e**2)
+
+    # Bearing to intruder relative to ownship heading
+    absolute_bearing = np.arctan2(rel_e, rel_n)
+    ownship_psi = ownship_states[:, PSI]
+    bearing = absolute_bearing - ownship_psi
+    # Wrap to [-pi, pi]
+    bearing = (bearing + np.pi) % (2 * np.pi) - np.pi
+
+    # Ownship bank angle (indicates maneuver)
+    ownship_phi = ownship_states[:, PHI]
+
+    # Closure rate (rate of change of separation) - computed via finite differences
+    # Positive = separating, Negative = closing
+    dt = 0.1  # Typical simulation timestep
+    closure_rate = np.zeros_like(separation_horiz)
+    closure_rate[1:] = np.diff(separation_horiz) / dt
+    closure_rate[0] = closure_rate[1] if len(closure_rate) > 1 else 0.0
+
+    # Normalize features to similar scales for balanced DTW
+    # Separation: typical range 0-50000 ft -> normalize by 10000
+    # Altitude diff: typical range -5000 to 5000 ft -> normalize by 2000
+    # Bearing: already in [-pi, pi] -> normalize by pi
+    # Phi: already in [-pi, pi] -> normalize by pi
+    # Closure rate: typical range -2000 to 2000 ft/s -> normalize by 500
+
+    NORM_SEP = 10000.0
+    NORM_ALT = 2000.0
+    NORM_ANGLE = np.pi
+    NORM_CLOSURE = 500.0
+
+    relative_trajectory = np.column_stack(
+        [
+            separation_horiz / NORM_SEP,
+            rel_alt / NORM_ALT,
+            bearing / NORM_ANGLE,
+            ownship_phi / NORM_ANGLE,
+            closure_rate / NORM_CLOSURE,
+        ]
+    )
+
+    return relative_trajectory
+
+
+def _relative_point_distance(p1: Tuple[float, ...], p2: Tuple[float, ...]) -> float:
+    """Point distance for relative geometry with proper angular handling."""
+    p1_arr = np.asarray(p1)
+    p2_arr = np.asarray(p2)
+
+    # Indices: [sep, rel_alt, bearing, phi, closure_rate]
+    # bearing (idx 2) and phi (idx 3) are angular - use proper difference
+
+    diff = p1_arr - p2_arr
+
+    # Angular indices (already normalized by pi, so wrap at 2.0)
+    for idx in [2, 3]:
+        diff[idx] = (diff[idx] + 1.0) % 2.0 - 1.0  # Wrap normalized angle diff
+
+    return float(np.linalg.norm(diff))
+
+
+def relative_geometry_dtw_distance(
+    rel_traj1: NDArray[np.float64],
+    rel_traj2: NDArray[np.float64],
+) -> float:
+    """DTW distance between relative geometry trajectories.
+
+    This is the recommended distance metric for ACASXU test case similarity.
+    It captures how similarly two collision avoidance scenarios evolve.
+
+    Args:
+        rel_traj1: Relative trajectory from build_relative_trajectory()
+        rel_traj2: Relative trajectory from build_relative_trajectory()
+
+    Returns:
+        DTW distance (lower = more similar scenarios)
+    """
+    if fastdtw is None:
+        raise ImportError(
+            "fastdtw is not installed. Please install it to use DTW-based distances."
+        )
+
+    seq1 = [tuple(row) for row in np.asarray(rel_traj1, dtype=np.float64)]
+    seq2 = [tuple(row) for row in np.asarray(rel_traj2, dtype=np.float64)]
+
+    distance, _ = fastdtw(seq1, seq2, dist=_relative_point_distance)
+    return float(distance)
+
+
+def _calculate_relative_distance_pair(args):
+    """Helper for parallel relative geometry distance computation."""
+    i, j, rel_traj1, rel_traj2, distance_func = args
+    if i == j:
+        return 0.0
+    return distance_func(rel_traj1, rel_traj2)
+
+
+def pairwise_relative_distances(
+    relative_trajectories: List[NDArray[np.float64]],
+    n_jobs: Optional[int] = None,
+) -> NDArray[np.float64]:
+    """Calculate pairwise distances between relative geometry trajectories.
+
+    Use this for ACASXU test case selection instead of pairwise_distances().
+
+    Args:
+        relative_trajectories: List of relative trajectory arrays from build_relative_trajectory()
+        n_jobs: Number of parallel jobs (None for auto)
+
+    Returns:
+        Symmetric distance matrix of shape (n, n)
+    """
+    n = len(relative_trajectories)
+    if n == 0:
+        return np.array([])
+
+    distances = np.zeros((n, n))
+
+    # Prepare arguments for parallel processing
+    args_list = []
+    for i in range(n):
+        for j in range(i, n):
+            args_list.append(
+                (
+                    i,
+                    j,
+                    relative_trajectories[i],
+                    relative_trajectories[j],
+                    relative_geometry_dtw_distance,
+                )
+            )
+
+    # Calculate distances in parallel
+    with ThreadPoolExecutor(max_workers=n_jobs) as executor:
+        results = list(executor.map(_calculate_relative_distance_pair, args_list))
+
+    # Fill the distance matrix
+    idx = 0
+    for i in range(n):
+        for j in range(i, n):
+            dist = results[idx]
+            distances[i, j] = dist
+            distances[j, i] = dist
+            idx += 1
+
+    return distances
 
 
 def _calculate_distance_pair(args):

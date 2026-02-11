@@ -29,8 +29,19 @@ class TestResult_ACAS:
     score: float = 0.0
 
     min_alt: float = 0.0
+    min_separation: float = (
+        np.inf
+    )  # Minimum horizontal separation between aircraft (ft)
 
+    # Ownship trajectory: [pos_n, pos_e, alt, phi, theta, psi, g_force]
     trajectory: np.ndarray = field(default_factory=lambda: np.array([]))
+
+    # Intruder trajectory: [pos_n, pos_e, alt, phi, theta, psi]
+    intruder_trajectory: np.ndarray = field(default_factory=lambda: np.array([]))
+
+    # Relative geometry trajectory (key for ACASXU similarity):
+    # [separation_horiz, rel_alt, bearing, ownship_phi, closure_rate]
+    relative_trajectory: np.ndarray = field(default_factory=lambda: np.array([]))
 
 
 @dataclass
