@@ -975,19 +975,18 @@ def generate_acasxu_dubins_single_case(
     intruder_placement_angle = np.random.uniform(0, 2 * np.pi)
 
     # Generate intruder heading based on velocity angle difference constraint
+    # Intruder faces toward ownship within the specified angle range
     if velocity_angle_diff_range is not None:
-        # Generate angle difference within the specified range
+        # Direction from intruder toward ownship
+        toward_ownship = (intruder_placement_angle + np.pi) % (2 * np.pi)
+
+        # Generate angle offset within the specified range
         min_diff, max_diff = velocity_angle_diff_range
         angle_diff = np.random.uniform(min_diff, max_diff)
 
         # Choose direction randomly (clockwise or counterclockwise)
-        # This gives us two possible angles: π/2 ± angle_diff
-        # We randomly choose one direction, but need to handle wrapping
         direction = np.random.choice([-1, 1])
-        intruder_theta = ownship_theta + direction * angle_diff
-
-        # Wrap to [0, 2π]
-        intruder_theta = intruder_theta % (2 * np.pi)
+        intruder_theta = (toward_ownship + direction * angle_diff) % (2 * np.pi)
     else:
         # Intruder heading is completely random (0 to 2π)
         intruder_theta = np.random.uniform(0, 2 * np.pi)
